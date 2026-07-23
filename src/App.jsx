@@ -105,7 +105,13 @@ var R_LAND=104, CLAMP_R=100, PLAYER_SPEED=19;
 var scene,camera,renderer,clock;
 var player,volcano,crater,lavaMesh,lavaGlow,ground,ocean,sun,amb,hemi;
 var objects=[], scenery=[];
-var monster=null,monsterActive=false,monsterSpeed=12,catchDist=2.8,monsterRising=false,monsterRiseT=0,MONSTER_RISE=1.6;
+var monster=null,monsterActive=false,monsterSpeed=10,catchDist=2.8,monsterRising=false,monsterRiseT=0,MONSTER_RISE=1.6;
+var shark=null,waterTime=0,sharkWarned=false,sharkAng=0;
+var _tmp=new THREE.Vector3(), _ONE=new THREE.Vector3(1,1,1), _tiny=new THREE.Vector3(0.01,0.01,0.01);
+var dragon=null,dragonActive=false,dragonT=0,dragonShadow=null;
+var COLOR_CENTER={ GREEN:[0,-82], YELLOW:[74,54], BLUE:[0,84], PINK:[-74,58], BROWN:[-88,-8], RED:[46,4] };
+function cdist(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1]); }
+function es(x){ return x<0.5?2*x*x:1-Math.pow(-2*x+2,2)/2; }
 var burst=[],ash=[],smoke=[],cracks=[],fireflies=[],torches=[];
 var keys={};
 var touchMove={x:0,z:0};
@@ -189,6 +195,8 @@ function init(){
   buildFX();
   buildPlayer();
   buildMonster();
+  buildShark();
+  buildDragon();
 
   mmCtx=el('minimap').getContext('2d');
   clock=new THREE.Clock();
@@ -424,7 +432,7 @@ function monsterSpawn(){
   if(spot){ sx=spot.x; sz=spot.z; }
   else { var a=Math.random()*6.28; sx=player.position.x+Math.cos(a)*44; sz=player.position.z+Math.sin(a)*44;
     var dd=Math.hypot(sx,sz); if(dd>CLAMP_R-2){ var kk=(CLAMP_R-2)/dd; sx*=kk; sz*=kk; } }
-  monster.position.set(sx, th(sx,sz)-4.5, sz); monster.visible=true;   // starts submerged
+  monster.position.set(sx, th(sx,sz)-4.5, sz); monster.visible=true; growl(); flash('IT RISES FROM THE DEEP...', '#b06bff');   // starts submerged
 }
 function buildFX(){
   for(var i=0;i<50;i++){var p=new THREE.Mesh(new THREE.SphereGeometry(.4,6,6),new THREE.MeshStandardMaterial({color:0xff6a1a,emissive:0xff3300,emissiveIntensity:.9}));p.visible=false;scene.add(p);burst.push({mesh:p,vx:0,vy:0,vz:0,life:0});}
@@ -460,6 +468,54 @@ function ensureAudio(){ try{ if(!actx){ actx=new (window.AudioContext||window.we
   windGain=actx.createGain();windGain.gain.value=0.015; src.connect(flt);flt.connect(windGain);windGain.connect(actx.destination);src.start();
 } }catch(e){} }
 function tick(freq){ if(muted||!actx)return; try{var o=actx.createOscillator(),g=actx.createGain();o.frequency.value=freq||440;o.type='square';g.gain.value=0.06;o.connect(g);g.connect(actx.destination);o.start();g.gain.exponentialRampToValueAtTime(0.0001,actx.currentTime+0.12);o.stop(actx.currentTime+0.13);}catch(e){} }
+function growl(){ if(muted||!actx)return; try{ var o=actx.createOscillator(),g=actx.createGain(); o.type='sawtooth'; o.frequency.setValueAtTime(48,actx.currentTime); o.frequency.exponentialRampToValueAtTime(92,actx.currentTime+1.0); g.gain.setValueAtTime(0.0001,actx.currentTime); g.gain.exponentialRampToValueAtTime(0.32,actx.currentTime+0.12); g.gain.exponentialRampToValueAtTime(0.0001,actx.currentTime+1.35); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime+1.4); }catch(e){} }
+function buildShark(){
+  shark=new THREE.Group();
+  var grey=new THREE.MeshStandardMaterial({color:0x828d98, roughness:.6, metalness:.05});
+  var belly=new THREE.MeshStandardMaterial({color:0xdfe4e8, roughness:.6});
+  var dark=new THREE.MeshStandardMaterial({color:0x1b2126, roughness:.5});
+  var white=new THREE.MeshStandardMaterial({color:0xffffff, roughness:.3});
+  var body=sh(new THREE.Mesh(new THREE.SphereGeometry(1,20,16), grey)); body.scale.set(3.2,1.05,1.25); shark.add(body);
+  var bel=new THREE.Mesh(new THREE.SphereGeometry(1,20,16), belly); bel.scale.set(3.0,0.72,1.15); bel.position.y=-0.34; shark.add(bel);
+  var snout=sh(new THREE.Mesh(new THREE.ConeGeometry(0.95,1.7,18), grey)); snout.rotation.z=-Math.PI/2; snout.position.set(3.4,0.12,0); shark.add(snout);
+  var mouth=new THREE.Mesh(new THREE.BoxGeometry(0.95,0.16,1.35), dark); mouth.position.set(3.0,-0.32,0); shark.add(mouth);
+  for(var i=0;i<8;i++){ var tth=new THREE.Mesh(new THREE.ConeGeometry(0.08,0.26,4), white); tth.position.set(3.15,-0.24,-0.55+i*0.157); tth.rotation.x=Math.PI; shark.add(tth); }
+  var s=new THREE.Shape(); s.moveTo(-0.75,0); s.lineTo(0.75,0); s.quadraticCurveTo(0.35,1.3,-0.3,1.55); s.quadraticCurveTo(-0.55,0.8,-0.75,0);
+  var dorsal=sh(new THREE.Mesh(new THREE.ExtrudeGeometry(s,{depth:0.16,bevelEnabled:false}), grey)); dorsal.position.set(-0.2,0.85,-0.08); shark.add(dorsal);
+  var pec=sh(new THREE.Mesh(new THREE.ConeGeometry(0.45,1.7,4), grey)); pec.scale.set(1,1,0.28); pec.rotation.z=Math.PI/2; pec.position.set(0.7,-0.25,1.05); shark.add(pec);
+  var pec2=sh(new THREE.Mesh(new THREE.ConeGeometry(0.45,1.7,4), grey)); pec2.scale.set(1,1,0.28); pec2.rotation.z=Math.PI/2; pec2.position.set(0.7,-0.25,-1.05); shark.add(pec2);
+  var tailT=sh(new THREE.Mesh(new THREE.ConeGeometry(0.5,2.1,4), grey)); tailT.scale.set(0.55,1,0.24); tailT.position.set(-3.5,0.75,0); tailT.rotation.z=0.5; shark.add(tailT);
+  var tailB=sh(new THREE.Mesh(new THREE.ConeGeometry(0.42,1.4,4), grey)); tailB.scale.set(0.55,1,0.24); tailB.position.set(-3.45,-0.45,0); tailB.rotation.z=-0.4; shark.add(tailB);
+  var e1=new THREE.Mesh(new THREE.SphereGeometry(0.13,8,8), dark); e1.position.set(2.55,0.28,0.72); shark.add(e1);
+  var e2=new THREE.Mesh(new THREE.SphereGeometry(0.13,8,8), dark); e2.position.set(2.55,0.28,-0.72); shark.add(e2);
+  shark.visible=false; scene.add(shark);
+}
+function buildDragon(){
+  dragon=new THREE.Group();
+  var om=new THREE.MeshStandardMaterial({color:0xff7a1f, roughness:.5, emissive:0x662000, emissiveIntensity:.5});
+  var om2=new THREE.MeshStandardMaterial({color:0xd85a10, roughness:.55});
+  var body=sh(new THREE.Mesh(new THREE.CylinderGeometry(.85,1.5,6,12), om)); body.rotation.z=Math.PI/2; dragon.add(body);
+  var tail=sh(new THREE.Mesh(new THREE.ConeGeometry(.7,3.4,10), om)); tail.rotation.z=Math.PI/2; tail.position.set(-4.3,0,0); dragon.add(tail);
+  var head=sh(new THREE.Mesh(new THREE.SphereGeometry(1.2,14,12), om)); head.position.set(3.4,0.2,0); dragon.add(head);
+  var snout=sh(new THREE.Mesh(new THREE.ConeGeometry(.6,1.4,10), om)); snout.rotation.z=-Math.PI/2; snout.position.set(4.6,0.1,0); dragon.add(snout);
+  var ws=new THREE.Shape(); ws.moveTo(0,0); ws.lineTo(5.6,1.2); ws.lineTo(5,-1.3); ws.lineTo(2.4,-2.7); ws.lineTo(0,0);
+  var w1=sh(new THREE.Mesh(new THREE.ExtrudeGeometry(ws,{depth:0.12,bevelEnabled:false}), om2)); w1.position.set(-.3,1.1,0.3); w1.rotation.set(-Math.PI/2,0,0); dragon.add(w1);
+  var w2=sh(new THREE.Mesh(new THREE.ExtrudeGeometry(ws,{depth:0.12,bevelEnabled:false}), om2)); w2.position.set(-.3,1.1,-0.3); w2.rotation.set(Math.PI/2,0,0); dragon.add(w2);
+  dragon.userData.wings=[w1,w2];
+  var em=new THREE.MeshStandardMaterial({color:0xffe08a, emissive:0xffcc33, emissiveIntensity:1.9});
+  var e1=new THREE.Mesh(new THREE.SphereGeometry(.2,8,8),em); e1.position.set(4,.55,.5); dragon.add(e1);
+  var e2=new THREE.Mesh(new THREE.SphereGeometry(.2,8,8),em); e2.position.set(4,.55,-.5); dragon.add(e2);
+  var gl=new THREE.PointLight(0xff8a2a,0,28); gl.position.set(3,0,0); dragon.add(gl); dragon.userData.glow=gl;
+  dragon.visible=false; scene.add(dragon);
+  dragonShadow=new THREE.Mesh(new THREE.CircleGeometry(1,28), new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0}));
+  dragonShadow.rotation.x=-Math.PI/2; dragonShadow.visible=false; scene.add(dragonShadow);
+}
+function playerInOcean(){ return Math.hypot(player.position.x,player.position.z) > 93; }
+function dieOrDragon(msg){ if(phaseFor(attempt)>=4 && dragon){ dragonDeath(); } else { failTrial(msg); } }
+function dragonDeath(){ if(state==='dead')return; state='resolving'; dragonActive=true; dragonT=0;
+  if(dragon){ dragon.visible=true; dragon.position.set(player.position.x-42, 62, player.position.z-42); if(dragon.userData.glow)dragon.userData.glow.intensity=2.2; }
+  if(dragonShadow) dragonShadow.visible=true;
+  growl(); flash('A DRAGON DIVES!', '#ff7a1f'); }
 function setWind(v){ if(windGain)try{windGain.gain.value=v;}catch(e){} }
 
 // ================= PHASES / INSTRUCTIONS =================
@@ -498,7 +554,7 @@ function pickInstruction(p){
     var lab=ins.cat==='house'?'ANY HOUSE':ins.cat==='wood'?'WOOD':'WATER';
     ins.banner='<span>'+lab+'</span>'; ins.voice=ins.cat==='house'?'Any house':cap(ins.cat);
     ins.sub=ins.cat==='house'?'Any cabin, cottage, barn, church, gazebo or house.':ins.cat==='wood'?'Trunks, fences, crates, logs, docks, towers.':'River, lake, waterfall, well or fountain.'; ins.compass=lab; }
-  else if(mode==='or'){ ins.colorA=pickColor(null); do{ins.colorB=pickColor(null);}while(ins.colorB===ins.colorA);
+  else if(mode==='or'){ ins.colorA=pickColor(null); var _ot=0; do{ins.colorB=pickColor(ins.colorA); _ot++;}while(_ot<16 && cdist(COLOR_CENTER[ins.colorB],COLOR_CENTER[ins.colorA])<80);
     ins.banner='<span style="color:'+C[ins.colorA].css+'">'+ins.colorA+'</span> <small>OR</small> <span style="color:'+C[ins.colorB].css+'">'+ins.colorB+'</span>'; ins.voice=cap(ins.colorA)+' or '+cap(ins.colorB); ins.sub='Either color keeps you safe.'; ins.compass=ins.colorA+' / '+ins.colorB; }
   else if(mode==='last'){ ins.color=lastSafeColor; ins.banner='<small>LAST SAFE</small><br>COLOR'; ins.voice='Last safe color'; ins.sub='Remember the color that saved you last time!'; ins.compass='???'; }
   else if(mode==='twice'){ ins.color=pickColorWithObject(); ins.banner='<small>TOUCH</small> <span style="color:'+C[ins.color].css+'">'+ins.color+'</span> <small>TWICE</small>'; ins.voice='Touch '+cap(ins.color)+' twice'; ins.sub='Touch it, step away, then touch it again.'; ins.compass=C[ins.color].dir; }
@@ -508,7 +564,7 @@ function pickInstruction(p){
 
 // ================= GAME FLOW =================
 function startGame(){
-  ensureAudio(); startMusic(); score=0; attempt=0; lastPhase=0; lastSafeColor=null; baseLavaY=-6; monsterActive=false; if(monster)monster.visible=false;
+  ensureAudio(); startMusic(); score=0; attempt=0; lastPhase=0; lastSafeColor=null; baseLavaY=-6; monsterActive=false; if(monster)monster.visible=false; waterTime=0; sharkWarned=false; dragonActive=false; if(shark)shark.visible=false; if(dragon)dragon.visible=false;
   restoreWorld(); el('start').classList.add('hidden'); el('over').classList.add('hidden'); el('hud').classList.remove('hidden');
   resetPlayer(); updateHud(); runStart=performance.now();
   introCountdown(function(){ nextTrial(); });
@@ -533,17 +589,17 @@ function nextTrial(){
   }
   objects.forEach(function(o){ o.glowMats.forEach(function(m){ m.emissive.setHex(0x000000); }); });
   el('target-word').innerHTML=instr.banner;
-  el('target-sub').textContent=instr.sub + (instr.excludeSet.length?'   RED = locked, reach a FURTHER glowing one!':'');
+  el('target-sub').textContent=instr.sub + (instr.excludeSet.length?'   Nearest is LOCKED — reach a FARTHER glowing one of the same colour!':''); waterTime=0; sharkWarned=false;
   el('compass').innerHTML = instr.compass? ('&#9758; '+instr.compass) : '';
   speak(instr.voice); state='prep'; prepTimer=PREP_TIME; rumble=false; el('timerbar').style.width='100%';
 }
 function succeedTrial(){ if(state!=='playing')return; state='resolving'; var t=touchedObject(); if(t)lastSafeColor=t.key;
   score++; updateHud(); flash('SAFE!  +1','#46c96a'); tick(720); setTimeout(function(){ if(state==='resolving')nextTrial(); },950); }
 function failTrial(msg){ if(state==='dead')return; state='resolving'; erupt(); flash(msg||'BURNED!','#ff4d4d'); setTimeout(gameOver,1100); }
-function resolveTimeout(){ if(instr.mode==='twice'){ failTrial('TOO SLOW!'); return; }
-  if(instr.mode==='none'){ if(touchedObject())failTrial('YOU TOUCHED IT!'); else safeFlood(null); return; }
+function resolveTimeout(){ if(instr.mode==='twice'){ dieOrDragon('TOO SLOW!'); return; }
+  if(instr.mode==='none'){ if(touchedObject())dieOrDragon('YOU TOUCHED IT!'); else safeFlood(null); return; }
   var safeObj=currentSafeObject();
-  if(safeObj) safeFlood(safeObj); else failTrial('CONSUMED BY LAVA'); }
+  if(safeObj) safeFlood(safeObj); else dieOrDragon('CONSUMED BY LAVA'); }
 function safeFlood(safeObj){ state='resolving'; erupt(); if(safeObj)lastSafeColor=safeObj.key;
   score++; updateHud(); flash('SAFE!  +1','#46c96a'); tick(720); setTimeout(function(){ if(state==='resolving')nextTrial(); },1000); }
 function gameOver(){ state='dead'; timeSurvived=(performance.now()-runStart)/1000;
@@ -688,6 +744,40 @@ function animate(){
     }
   }
 
+  // sharks patrol the OCEAN around the island: stray into the sea and one closes in
+  if(state==='playing' && shark){
+    if(playerInOcean()){ waterTime+=dt;
+      if(!shark.visible){ shark.visible=true; shark.scale.setScalar(0.2); sharkAng=Math.atan2(player.position.z,player.position.x)+1.4; }
+      shark.scale.lerp(_ONE,0.1);
+      sharkAng+=dt*(0.8+waterTime*0.16);
+      var rad=Math.max(3.2, 8-waterTime*0.7);
+      var tx=player.position.x+Math.cos(sharkAng)*rad, tz=player.position.z+Math.sin(sharkAng)*rad;
+      shark.position.lerp(_tmp.set(tx, 0.5+Math.sin(t*2.5)*0.12, tz), 0.1);
+      shark.rotation.y = -Math.atan2(Math.cos(sharkAng), -Math.sin(sharkAng));
+      if(waterTime>3 && !sharkWarned){ sharkWarned=true; flash('SHARK! GET OUT OF THE WATER!', '#3fa9ff'); }
+      if(waterTime>=6){ failTrial('A SHARK GOT YOU!'); }
+    } else { waterTime=0; sharkWarned=false; if(shark.visible){ shark.scale.lerp(_tiny,0.2); if(shark.scale.x<0.05) shark.visible=false; } }
+  } else if(shark && state!=='playing'){ shark.visible=false; }
+
+  // dragon dive (Round 4 fail)
+  if(dragonActive && dragon){
+    dragonT+=dt; var P=Math.min(1,dragonT/2.6);
+    var dpx=player.position.x, dpz=player.position.z, dgy=th(dpx,dpz);
+    if(dragonShadow){ dragonShadow.position.set(dpx, dgy+0.12, dpz); var scq=0.5+Math.min(1,P*1.5)*3.6; dragonShadow.scale.set(scq,scq,scq); dragonShadow.material.opacity=0.55*Math.min(1,P*1.5); }
+    if(dragon.userData.wings){ var fl=Math.sin(t*16)*0.55; dragon.userData.wings[0].rotation.x=-Math.PI/2+fl; dragon.userData.wings[1].rotation.x=Math.PI/2-fl; }
+    if(P<0.6){ var k=es(P/0.6);
+      dragon.position.set(dpx-42*(1-k), 62-(62-(dgy+3.5))*k, dpz-42*(1-k));
+      dragon.lookAt(dpx,dgy+1,dpz); shake=Math.max(shake,0.3*k);
+    } else if(P<1){ var k2=(P-0.6)/0.4;
+      dragon.position.set(dpx, dgy+3.5+k2*36, dpz);
+      player.position.y=dgy+1.2+k2*32;
+      dragon.lookAt(dpx, dragon.position.y-6, dpz); shake=Math.max(shake,0.7);
+    } else {
+      dragonActive=false; dragon.visible=false; if(dragonShadow)dragonShadow.visible=false;
+      flash('EATEN BY THE DRAGON!', '#ff7a1f'); setTimeout(gameOver, 600);
+    }
+  }
+
   // spinning windmills
   objects.forEach(function(o){ if(o.spin&&o.visible) o.spin.rotation.z+=dt*1.2; });
 
@@ -809,7 +899,7 @@ init(); updateHud(); el('nameInput').value=getName();
         <div className="rounds">
           <div className="rc"><b>1 • Color Rush</b>Learn the isle. Reach the called color. 10s.</div>
           <div className="rc"><b>2 • Chaos</b>NOT green, ANY HOUSE, WOOD, WATER. Nearest match locked — go a little further. 8s.</div>
-          <div className="rc"><b>3 • Panic</b>Two nearest locked — reach further. Isle breaks apart. 6s AND BE CREFUL BY SOMETHINGS!!.</div>
+          <div className="rc"><b>3 • Panic</b>Two nearest locked — reach further. Isle breaks apart. 6s.</div>
           <div className="rc"><b>∞ • Endless</b>New command every few seconds. Lava never stops.</div>
         </div>
         <button id="startBtn">WASH ASHORE</button>
