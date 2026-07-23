@@ -128,7 +128,7 @@ var timeLeft=10,roundTime=10,score=0,attempt=0,lastPhase=0;
 var lastSafeColor=null,lastTouchedObj=null,twiceCount=0;
 var runStart=0,timeSurvived=0,muted=false,baseLavaY=-6,currentEntryId=null;
 var shake=0,rumble=false,dayTime=0.12;
-var mmCtx;
+var mmCtx; var prepTimer=0, PREP_TIME=2;
 
 var el=function(id){return document.getElementById(id);};
 
@@ -504,9 +504,9 @@ function nextTrial(){
   }
   objects.forEach(function(o){ o.glowMats.forEach(function(m){ m.emissive.setHex(0x000000); }); });
   el('target-word').innerHTML=instr.banner;
-  el('target-sub').textContent=instr.sub + (instr.excludeSet.length&&p>=3?'  Skip the nearest — reach one further!':'');
+  el('target-sub').textContent=instr.sub + (instr.excludeSet.length?'   RED = locked, reach a FURTHER glowing one!':'');
   el('compass').innerHTML = instr.compass? ('&#9758; '+instr.compass) : '';
-  speak(instr.voice); state='playing';
+  speak(instr.voice); state='prep'; prepTimer=PREP_TIME; rumble=false; el('timerbar').style.width='100%';
 }
 function succeedTrial(){ if(state!=='playing')return; state='resolving'; var t=touchedObject(); if(t)lastSafeColor=t.key;
   score++; updateHud(); flash('SAFE!  +1','#46c96a'); tick(720); setTimeout(function(){ if(state==='resolving')nextTrial(); },950); }
@@ -549,8 +549,10 @@ function drawMinimap(){
   // volcano
   mmCtx.fillStyle='#ff5a1e'; mmCtx.beginPath(); mmCtx.arc(cx,cy,4,0,6.28); mmCtx.fill();
   // safe objects
-  if(instr){ objects.forEach(function(o){ if(o.visible&&objSafe(o)&&!inSet(o)){ mmCtx.fillStyle=C[o.key].css;
-    mmCtx.fillRect(cx+o.x*scale-1.5, cy+o.z*scale-1.5, 3,3); } }); }
+  if(instr){ objects.forEach(function(o){ if(!o.visible)return;
+    var loc=objSafe(o)&&inSet(o), danger=(instr.mode==='not'&&o.key===instr.color);
+    if(objSafe(o)&&!inSet(o)){ mmCtx.fillStyle=C[o.key].css; mmCtx.fillRect(cx+o.x*scale-1.5, cy+o.z*scale-1.5, 3,3); }
+    else if(loc||danger){ mmCtx.fillStyle='#ff3b3b'; mmCtx.fillRect(cx+o.x*scale-1.5, cy+o.z*scale-1.5, 3,3); } }); }
   // player
   mmCtx.fillStyle='#fff'; mmCtx.beginPath(); mmCtx.arc(cx+player.position.x*scale, cy+player.position.z*scale, 3,0,6.28); mmCtx.fill();
   mmCtx.restore();
@@ -594,7 +596,7 @@ function animate(){
   var dt=Math.min(clock.getDelta(),0.05), t=clock.elapsedTime;
   dayTime=(dayTime+dt/140)%1;
 
-  if(state==='playing'){
+  if(state==='playing'||state==='prep'){
     var mx=0,mz=0;
     if(keys['w']||keys['arrowup'])mz-=1; if(keys['s']||keys['arrowdown'])mz+=1;
     if(keys['a']||keys['arrowleft'])mx-=1; if(keys['d']||keys['arrowright'])mx+=1;
@@ -607,7 +609,17 @@ function animate(){
       if(d>CLAMP_R){ var k=CLAMP_R/d; player.position.x*=k; player.position.z*=k; } }
     var gy=th(player.position.x,player.position.z);
     player.position.y=gy+(len>0?Math.abs(Math.sin(t*12))*0.28:0);
+  }
 
+  if(state==='prep'){
+    prepTimer-=dt;
+    el('timerbar').style.width='100%';
+    el('timernum').textContent='READY '+Math.ceil(Math.max(0,prepTimer));
+    el('timernum').style.color='#ffd23f';
+    if(prepTimer<=0){ state='playing'; timeLeft=roundTime; lastTouchedObj=touchedObject(); }
+  }
+
+  if(state==='playing'){
     var touched=touchedObject();
     if(touched!==lastTouchedObj){ if(touched&&instr.mode==='twice'&&touched.key===instr.color){ twiceCount++; if(twiceCount>=2)succeedTrial(); } lastTouchedObj=touched; }
     if(state==='playing'){ if(instr.mode==='none'&&touched)failTrial('YOU TOUCHED IT!'); else if(instr.mode==='not'&&touched&&touched.key===instr.color)failTrial('TOUCHED '+instr.color+'!'); }
@@ -623,7 +635,9 @@ function animate(){
 
   // glow qualifying
   var pulse=0.55+Math.sin(t*6)*0.4;
-  objects.forEach(function(o){ if(o.visible&&instr&&objSafe(o)&&!inSet(o)) o.glowMats.forEach(function(m){ m.emissive.setHex(C[o.key].hex); m.emissiveIntensity=pulse; }); });
+  objects.forEach(function(o){ if(!o.visible||!instr) return;
+    if(objSafe(o)&&!inSet(o)){ o.glowMats.forEach(function(m){ m.emissive.setHex(C[o.key].hex); m.emissiveIntensity=pulse; }); }
+    else if((objSafe(o)&&inSet(o))||(instr.mode==='not'&&o.key===instr.color)){ var rp=0.4+Math.sin(t*8)*0.3; o.glowMats.forEach(function(m){ m.emissive.setHex(0xff2020); m.emissiveIntensity=rp; }); } });
 
   // spinning windmills
   objects.forEach(function(o){ if(o.spin&&o.visible) o.spin.rotation.z+=dt*1.2; });
@@ -761,6 +775,11 @@ init(); updateHud(); el('nameInput').value=getName();
           <button id="saveName">SAVE</button>
         </div>
         <div id="board"></div>
+        <div className="qrbox">
+          <div style={{fontSize:14,opacity:.85,marginBottom:6}}>Follow CodeChef VIT Chennai on Instagram</div>
+          <div className="qr"><img src="/qr.png" alt="@codechef.vitc Instagram QR" /></div>
+          <a className="iglink" href="https://www.instagram.com/codechef.vitc" target="_blank" rel="noreferrer">@codechef.vitc</a>
+        </div>
         <button id="retryBtn">PLAY AGAIN</button>
         <div className="subtle">Scores saved this session • <span id="clearScores" style={{textDecoration:'underline',cursor:'pointer'}}>clear scores</span></div>
       </div>
