@@ -105,7 +105,7 @@ var R_LAND=104, CLAMP_R=100, PLAYER_SPEED=19;
 var scene,camera,renderer,clock;
 var player,volcano,crater,lavaMesh,lavaGlow,ground,ocean,sun,amb,hemi;
 var objects=[], scenery=[];
-var monster=null,monsterActive=false,monsterSpeed=12,catchDist=2.8;
+var monster=null,monsterActive=false,monsterSpeed=12,catchDist=2.8,monsterRising=false,monsterRiseT=0,MONSTER_RISE=1.6;
 var burst=[],ash=[],smoke=[],cracks=[],fireflies=[],torches=[];
 var keys={};
 var touchMove={x:0,z:0};
@@ -413,10 +413,18 @@ function buildMonster(){
   monster.visible=false; scene.add(monster);
 }
 function monsterSpawn(){
-  if(!monster) return; monsterActive=true;
-  var a=Math.random()*6.28, sx=player.position.x+Math.cos(a)*44, sz=player.position.z+Math.sin(a)*44;
-  var dd=Math.hypot(sx,sz); if(dd>CLAMP_R-2){ var kk=(CLAMP_R-2)/dd; sx*=kk; sz*=kk; }
-  monster.position.set(sx, th(sx,sz), sz); monster.visible=true;
+  if(!monster) return; monsterActive=true; monsterRising=true; monsterRiseT=MONSTER_RISE;
+  // emerge from a WATER body if one is around, else from the ground far off
+  var waters=objects.filter(function(o){ return o.visible && o.tags.indexOf('water')>=0; });
+  var sx,sz,spot=null;
+  if(waters.length){
+    var pref=waters.filter(function(o){ var d=Math.hypot(o.x-player.position.x,o.z-player.position.z); return d>20&&d<85; });
+    var pool=pref.length?pref:waters; spot=pool[(Math.random()*pool.length)|0];
+  }
+  if(spot){ sx=spot.x; sz=spot.z; }
+  else { var a=Math.random()*6.28; sx=player.position.x+Math.cos(a)*44; sz=player.position.z+Math.sin(a)*44;
+    var dd=Math.hypot(sx,sz); if(dd>CLAMP_R-2){ var kk=(CLAMP_R-2)/dd; sx*=kk; sz*=kk; } }
+  monster.position.set(sx, th(sx,sz)-4.5, sz); monster.visible=true;   // starts submerged
 }
 function buildFX(){
   for(var i=0;i<50;i++){var p=new THREE.Mesh(new THREE.SphereGeometry(.4,6,6),new THREE.MeshStandardMaterial({color:0xff6a1a,emissive:0xff3300,emissiveIntensity:.9}));p.visible=false;scene.add(p);burst.push({mesh:p,vx:0,vy:0,vz:0,life:0});}
@@ -657,19 +665,26 @@ function animate(){
   // glow qualifying
   var pulse=0.55+Math.sin(t*6)*0.4;
   objects.forEach(function(o){ if(o.visible&&instr&&objSafe(o)&&!inSet(o)) o.glowMats.forEach(function(m){ m.emissive.setHex(C[o.key].hex); m.emissiveIntensity=pulse; }); });
-  // monster chase (Round 3+): hunts you until you stand on a safe object
+  // monster: rises out of the water in Round 3+, then hunts you until you reach safety
   if(monster){
     monster.visible = monsterActive && (state==='playing'||state==='prep');
     if(monster.visible){
-      var safeNow = (state==='playing') ? currentSafeObject() : null;
-      var dx=player.position.x-monster.position.x, dz=player.position.z-monster.position.z, md=Math.hypot(dx,dz);
-      if(state==='playing' && !safeNow && md>0.01){
-        monster.position.x+=dx/md*monsterSpeed*dt; monster.position.z+=dz/md*monsterSpeed*dt;
-        monster.rotation.y=Math.atan2(dx,dz);
+      var standY=th(monster.position.x,monster.position.z);
+      if(monsterRising){
+        monsterRiseT-=dt;
+        var kr=Math.max(0,Math.min(1,1-monsterRiseT/MONSTER_RISE));
+        monster.position.y=(standY-4.5)+4.5*kr+Math.abs(Math.sin(t*6))*0.12;
+        monster.rotation.y+=dt*2;
+        if(monster.userData.glow) monster.userData.glow.intensity=kr*2;
+        if(monsterRiseT<=0) monsterRising=false;
+      } else {
+        var safeNow=(state==='playing')?currentSafeObject():null;
+        var dx=player.position.x-monster.position.x, dz=player.position.z-monster.position.z, md=Math.hypot(dx,dz);
+        if(state==='playing' && !safeNow && md>0.01){ monster.position.x+=dx/md*monsterSpeed*dt; monster.position.z+=dz/md*monsterSpeed*dt; monster.rotation.y=Math.atan2(dx,dz); }
+        monster.position.y=standY+Math.abs(Math.sin(t*8))*0.15;
+        if(monster.userData.glow) monster.userData.glow.intensity=1.6+Math.sin(t*10)*0.7;
+        if(state==='playing' && !safeNow && md<catchDist) failTrial('THE MONSTER GOT YOU!');
       }
-      monster.position.y=th(monster.position.x,monster.position.z)+Math.abs(Math.sin(t*8))*0.15;
-      if(monster.userData.glow) monster.userData.glow.intensity=1.6+Math.sin(t*10)*0.7;
-      if(state==='playing' && !safeNow && md<catchDist) failTrial('THE MONSTER GOT YOU!');
     }
   }
 
@@ -794,7 +809,7 @@ init(); updateHud(); el('nameInput').value=getName();
         <div className="rounds">
           <div className="rc"><b>1 • Color Rush</b>Learn the isle. Reach the called color. 10s.</div>
           <div className="rc"><b>2 • Chaos</b>NOT green, ANY HOUSE, WOOD, WATER. Nearest match locked — go a little further. 8s.</div>
-          <div className="rc"><b>3 • Panic</b>Two nearest locked — reach further. Isle breaks apart. 6s.</div>
+          <div className="rc"><b>3 • Panic</b>Two nearest locked — reach further. Isle breaks apart. 6s AND BE CREFUL BY SOMETHINGS!!.</div>
           <div className="rc"><b>∞ • Endless</b>New command every few seconds. Lava never stops.</div>
         </div>
         <button id="startBtn">WASH ASHORE</button>
