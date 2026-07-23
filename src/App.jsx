@@ -105,6 +105,7 @@ var R_LAND=104, CLAMP_R=100, PLAYER_SPEED=19;
 var scene,camera,renderer,clock;
 var player,volcano,crater,lavaMesh,lavaGlow,ground,ocean,sun,amb,hemi;
 var objects=[], scenery=[];
+var monster=null,monsterActive=false,monsterSpeed=12,catchDist=2.8;
 var burst=[],ash=[],smoke=[],cracks=[],fireflies=[],torches=[];
 var keys={};
 var touchMove={x:0,z:0};
@@ -187,6 +188,7 @@ function init(){
   buildVolcano();
   buildFX();
   buildPlayer();
+  buildMonster();
 
   mmCtx=el('minimap').getContext('2d');
   clock=new THREE.Clock();
@@ -397,6 +399,25 @@ function buildVolcano(){
   volcano.position.y=th(0,0); scene.add(volcano);
   for(var i=0;i<14;i++){ var a=(i/14)*6.28; var ck=new THREE.Mesh(new THREE.BoxGeometry(1,0.15,60), new THREE.MeshBasicMaterial({color:0xff5a1e})); ck.position.set(Math.cos(a)*33,th(0,0)+0.4,Math.sin(a)*33); ck.rotation.y=-a+Math.PI/2; ck.visible=false; ck.scale.z=0.01; scene.add(ck); cracks.push(ck); }
 }
+function buildMonster(){
+  monster=new THREE.Group();
+  var bm=new THREE.MeshStandardMaterial({color:0x120018, roughness:.55, emissive:0x220033, emissiveIntensity:.35});
+  var torso=sh(new THREE.Mesh(new THREE.CylinderGeometry(.5,1.15,3,10), bm)); torso.position.y=1.6; monster.add(torso);
+  var head=sh(new THREE.Mesh(new THREE.SphereGeometry(.85,12,12), bm)); head.position.y=3.4; monster.add(head);
+  var em=new THREE.MeshStandardMaterial({color:0xff2020, emissive:0xff0000, emissiveIntensity:1.6});
+  var e1=new THREE.Mesh(new THREE.SphereGeometry(.17,8,8),em); e1.position.set(-.3,3.5,.64); monster.add(e1);
+  var e2=new THREE.Mesh(new THREE.SphereGeometry(.17,8,8),em); e2.position.set(.3,3.5,.64); monster.add(e2);
+  var a1=sh(new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,2.6,8), bm)); a1.position.set(-1.05,1.9,0); a1.rotation.z=.5; monster.add(a1);
+  var a2=sh(new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,2.6,8), bm)); a2.position.set(1.05,1.9,0); a2.rotation.z=-.5; monster.add(a2);
+  var gl=new THREE.PointLight(0xff0000,0,14); gl.position.set(0,3.4,0); monster.add(gl); monster.userData.glow=gl;
+  monster.visible=false; scene.add(monster);
+}
+function monsterSpawn(){
+  if(!monster) return; monsterActive=true;
+  var a=Math.random()*6.28, sx=player.position.x+Math.cos(a)*44, sz=player.position.z+Math.sin(a)*44;
+  var dd=Math.hypot(sx,sz); if(dd>CLAMP_R-2){ var kk=(CLAMP_R-2)/dd; sx*=kk; sz*=kk; }
+  monster.position.set(sx, th(sx,sz), sz); monster.visible=true;
+}
 function buildFX(){
   for(var i=0;i<50;i++){var p=new THREE.Mesh(new THREE.SphereGeometry(.4,6,6),new THREE.MeshStandardMaterial({color:0xff6a1a,emissive:0xff3300,emissiveIntensity:.9}));p.visible=false;scene.add(p);burst.push({mesh:p,vx:0,vy:0,vz:0,life:0});}
   for(var j=0;j<48;j++){var a2=new THREE.Mesh(new THREE.SphereGeometry(.18,5,5),new THREE.MeshBasicMaterial({color:0x2a2320}));a2.visible=false;scene.add(a2);ash.push({mesh:a2,vy:0,life:0});}
@@ -479,7 +500,7 @@ function pickInstruction(p){
 
 // ================= GAME FLOW =================
 function startGame(){
-  ensureAudio(); startMusic(); score=0; attempt=0; lastPhase=0; lastSafeColor=null; baseLavaY=-6;
+  ensureAudio(); startMusic(); score=0; attempt=0; lastPhase=0; lastSafeColor=null; baseLavaY=-6; monsterActive=false; if(monster)monster.visible=false;
   restoreWorld(); el('start').classList.add('hidden'); el('over').classList.add('hidden'); el('hud').classList.remove('hidden');
   resetPlayer(); updateHud(); runStart=performance.now();
   introCountdown(function(){ nextTrial(); });
@@ -491,7 +512,7 @@ function nextTrial(){
   attempt++; var p=phaseFor(attempt); roundTime=timerForPhase(p,attempt); musicPhase(p);
   if(p!==lastPhase){ lastPhase=p; el('roundtag').textContent=phaseName(p);
     if(p===2)speak('Chaos mode'); if(p===3)speak('Panic mode'); if(p===4)speak('Endless survival'); }
-  if(p>=3){ triggerEvent(); baseLavaY=Math.min(-0.2, baseLavaY+0.4); } else baseLavaY=-6;
+  if(p>=3){ triggerEvent(); baseLavaY=Math.min(-0.2, baseLavaY+0.4); monsterSpawn(); } else { baseLavaY=-6; monsterActive=false; if(monster)monster.visible=false; }
   clearCracks(); rumble=false;
   instr=pickInstruction(p); timeLeft=roundTime; lastTouchedObj=null; twiceCount=0;
   // Escalating "reach a further one" rule:
@@ -635,9 +656,22 @@ function animate(){
 
   // glow qualifying
   var pulse=0.55+Math.sin(t*6)*0.4;
-  objects.forEach(function(o){ if(!o.visible||!instr) return;
-    if(objSafe(o)&&!inSet(o)){ o.glowMats.forEach(function(m){ m.emissive.setHex(C[o.key].hex); m.emissiveIntensity=pulse; }); }
-    else if((objSafe(o)&&inSet(o))||(instr.mode==='not'&&o.key===instr.color)){ var rp=0.4+Math.sin(t*8)*0.3; o.glowMats.forEach(function(m){ m.emissive.setHex(0xff2020); m.emissiveIntensity=rp; }); } });
+  objects.forEach(function(o){ if(o.visible&&instr&&objSafe(o)&&!inSet(o)) o.glowMats.forEach(function(m){ m.emissive.setHex(C[o.key].hex); m.emissiveIntensity=pulse; }); });
+  // monster chase (Round 3+): hunts you until you stand on a safe object
+  if(monster){
+    monster.visible = monsterActive && (state==='playing'||state==='prep');
+    if(monster.visible){
+      var safeNow = (state==='playing') ? currentSafeObject() : null;
+      var dx=player.position.x-monster.position.x, dz=player.position.z-monster.position.z, md=Math.hypot(dx,dz);
+      if(state==='playing' && !safeNow && md>0.01){
+        monster.position.x+=dx/md*monsterSpeed*dt; monster.position.z+=dz/md*monsterSpeed*dt;
+        monster.rotation.y=Math.atan2(dx,dz);
+      }
+      monster.position.y=th(monster.position.x,monster.position.z)+Math.abs(Math.sin(t*8))*0.15;
+      if(monster.userData.glow) monster.userData.glow.intensity=1.6+Math.sin(t*10)*0.7;
+      if(state==='playing' && !safeNow && md<catchDist) failTrial('THE MONSTER GOT YOU!');
+    }
+  }
 
   // spinning windmills
   objects.forEach(function(o){ if(o.spin&&o.visible) o.spin.rotation.z+=dt*1.2; });
@@ -775,11 +809,6 @@ init(); updateHud(); el('nameInput').value=getName();
           <button id="saveName">SAVE</button>
         </div>
         <div id="board"></div>
-        <div className="qrbox">
-          <div style={{fontSize:14,opacity:.85,marginBottom:6}}>Follow CodeChef VIT Chennai on Instagram</div>
-          <div className="qr"><img src="/qr.png" alt="@codechef.vitc Instagram QR" /></div>
-          <a className="iglink" href="https://www.instagram.com/codechef.vitc" target="_blank" rel="noreferrer">@codechef.vitc</a>
-        </div>
         <button id="retryBtn">PLAY AGAIN</button>
         <div className="subtle">Scores saved this session • <span id="clearScores" style={{textDecoration:'underline',cursor:'pointer'}}>clear scores</span></div>
       </div>
