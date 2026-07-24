@@ -121,7 +121,7 @@ function initJoystick(){
   if(isTouch) j.style.display='block';
   var id=null,R=44,cx=0,cy=0;
   function setC(){ var r=j.getBoundingClientRect(); cx=r.left+r.width/2; cy=r.top+r.height/2; }
-  function mv(px,py){ var dx=px-cx,dy=py-cy,d=Math.hypot(dx,dy); if(d>R){dx=dx/d*R;dy=dy/d*R;} s.style.transform='translate('+dx+'px,'+dy+'px)'; touchMove.x=dx/R; touchMove.z=dy/R; }
+  function mv(px,py){ var dx=px-cx,dy=py-cy,d=Math.hypot(dx,dy); if(d>R){dx=dx/d*R;dy=dy/d*R;} s.style.transform='translate('+dx+'px,'+dy+'px)'; if(d<7){ touchMove.x=0; touchMove.z=0; return; } touchMove.x=dx/R; touchMove.z=dy/R; }
   function end(){ touchMove.x=0; touchMove.z=0; s.style.transform='translate(0,0)'; }
   j.addEventListener('touchstart',function(e){ e.preventDefault(); setC(); var t=e.changedTouches[0]; id=t.identifier; mv(t.clientX,t.clientY); },{passive:false});
   j.addEventListener('touchmove',function(e){ e.preventDefault(); for(var i=0;i<e.changedTouches.length;i++){var t=e.changedTouches[i]; if(t.identifier===id) mv(t.clientX,t.clientY);} },{passive:false});
@@ -686,14 +686,15 @@ function animate(){
     if(keys['w']||keys['arrowup'])mz-=1; if(keys['s']||keys['arrowdown'])mz+=1;
     if(keys['a']||keys['arrowleft'])mx-=1; if(keys['d']||keys['arrowright'])mx+=1;
     mx+=touchMove.x; mz+=touchMove.z;
-    var len=Math.hypot(mx,mz);
-    if(len>0){ mx/=len; mz/=len;
-      player.position.x+=mx*PLAYER_SPEED*dt; player.position.z+=mz*PLAYER_SPEED*dt;
-      player.rotation.y=Math.atan2(mx,mz);
+    var mag=Math.hypot(mx,mz);
+    if(mag>0.05){ var nx=mx/mag, nz=mz/mag;
+      var sp=PLAYER_SPEED*(LOW?0.7:1)*Math.min(1,mag);   // analog: partial joystick push = partial speed
+      player.position.x+=nx*sp*dt; player.position.z+=nz*sp*dt;
+      player.rotation.y=Math.atan2(nx,nz);
       var d=Math.hypot(player.position.x,player.position.z);
       if(d>CLAMP_R){ var k=CLAMP_R/d; player.position.x*=k; player.position.z*=k; } }
     var gy=th(player.position.x,player.position.z);
-    player.position.y=gy+(len>0?Math.abs(Math.sin(t*12))*0.28:0);
+    player.position.y=gy+(mag>0.05?Math.abs(Math.sin(t*12))*0.28:0);
   }
 
   if(state==='prep'){
